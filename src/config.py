@@ -16,7 +16,7 @@ class GPTConfig():
     n_head         : int = 4
     n_embd         : int = 64
     vocab_size     : int = 65
-    attention_type : str = "single"
+    attention_type : str = "multi"
     
     # Training Data
     batch_size     : int = 32
@@ -135,7 +135,7 @@ class GPTConfig():
         
         # Set reproducibility seed
         torch.manual_seed(self.seed)
-        if self.device == 'cuda':
+        if self.device.type == 'cuda':
             torch.cuda.manual_seed_all(self.seed)
         
         # ===== Summary Output =====

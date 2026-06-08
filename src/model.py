@@ -6,19 +6,14 @@ import torch.optim as optim
 from config import GPTConfig
 
 class Head(nn.Module):
-    """Some Information about Head"""
     def __init__(self, config):
         super().__init__()
-        if config.attention_type == 'single':
-            self.query = nn.Linear(config.n_embd, config.n_embd, bias=False)
-            self.key = nn.Linear(config.n_embd, config.n_embd, bias=False)
-            self.value = nn.Linear(config.n_embd, config.n_embd, bias=False)
-            self.register_buffer('tril', torch.tril(torch.ones((config.block_size, config.block_size))))
-        else:
-            self.query = nn.Linear(config.n_embd, config.head_size, bias=False)
-            self.key = nn.Linear(config.n_embd, config.head_size, bias=False)
-            self.value = nn.Linear(config.n_embd, config.head_size, bias=False)
-            self.register_buffer('tril', torch.tril(torch.ones((config.block_size, config.block_size))))
+        # Only supports mutli-head attention
+        self.query = nn.Linear(config.n_embd, config.head_size, bias=False)
+        self.key = nn.Linear(config.n_embd, config.head_size, bias=False)
+        self.value = nn.Linear(config.n_embd, config.head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones((config.block_size, config.block_size))))
+        self.head_size = config.head_size
 
         self.dropout = nn.Dropout(config.dropout)
 
@@ -26,8 +21,7 @@ class Head(nn.Module):
         B, T, C = x.shape
         q = self.query(x)
         k = self.key(x)
-        
-        wei = q @ k.transpose(-2, -1) * C**-0.5
+        wei = q @ k.transpose(-2, -1) * self.head_size**-0.5
         wei = wei.masked_fill(self.tril[:T, :T] == 0,  float('-inf'))
         wei = F.softmax(wei, dim=-1)
         wei = self.dropout(wei)
@@ -35,43 +29,8 @@ class Head(nn.Module):
         v = self.value(x)
         out = wei @ v
         return out
-
-class SelfAttention(nn.Module):
-    """Some Information about SelfAttention"""
-    def __init__(self):
-        super().__init__()
-        self.config = GPTConfig()
-    
-    def __init__(self, config):
-        super().__init__()
-        
-        self.block_size = config.block_size
-        self.device = config.device
-        self.token_embedding_table = nn.Embedding(config.vocab_size, config.n_embd)
-        self.position_embedding_table = nn.Embedding(config.block_size, config.n_embd)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size)
-        self.sa_head = Head(config)
-
-
-    def forward(self, idx, targets=None):
-        B, T = idx.shape
-        tok_embd = self.token_embedding_table(idx)
-        pos_embd = self.position_embedding_table(torch.arange(T, device=self.device))
-        x = tok_embd + pos_embd
-        x = self.sa_head(x)
-        logits = self.lm_head(x)
-        
-        if targets is None:
-            loss = None
-        else:
-            B, T, C = logits.shape
-            logits = logits.view(B*T, C)
-            targets = targets.view(B*T)
-            loss = F.cross_entropy(logits, targets)
-        return logits, loss
     
 class MultiHeadAttention(nn.Module):
-    """Some Information about MultiHeadAttention"""
     def __init__(self, config):
         super().__init__()
         self.heads = nn.ModuleList([Head(config) for _ in range(config.n_head)])
@@ -83,7 +42,6 @@ class MultiHeadAttention(nn.Module):
         return out
     
 class FeedForward(nn.Module):
-    """Some Information about FeedForward"""
     def __init__(self, config):
         super().__init__()
         self.net = nn.Sequential(
@@ -97,7 +55,6 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Block(nn.Module):
-    """Some Information about Block"""
     def __init__(self, config):
         super().__init__()
         self.sa_heads = MultiHeadAttention(config)
@@ -121,9 +78,6 @@ class GPT(nn.Module):
         self.position_embedding_table = nn.Embedding(config.block_size, config.n_embd)
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd)
-        # self.sa_heads = MultiHeadAttention(config)
-        # self.ffw = FeedForward(config)
-        # self.lm_head  = nn.Linear(config.n_embd, config.vocab_size)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size)
 
     def forward(self, idx, targets=None):
@@ -132,6 +86,7 @@ class GPT(nn.Module):
         pos_embd = self.position_embedding_table(torch.arange(T, device=self.device)) # (T, C)
         x = tok_embd + pos_embd
         x = self.blocks(x)
+        x = self.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
 
         if targets is None:
